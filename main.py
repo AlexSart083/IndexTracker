@@ -145,7 +145,12 @@ with tab1:
                 try:
                     data = yf.download(ticker, period=periodo_mapping[periodo], progress=False)
                     if not data.empty and 'Close' in data.columns:
-                        dati_indici[nome_indice] = data
+                        # Verifichiamo che abbiamo dati sufficienti
+                        close_data = data['Close'].dropna()
+                        if len(close_data) >= 2:
+                            dati_indici[nome_indice] = data
+                        else:
+                            errori_download.append(f"{nome_indice} ({ticker}): Dati insufficienti")
                     else:
                         errori_download.append(f"{nome_indice} ({ticker}): Nessun dato disponibile")
                 except Exception as e:
@@ -188,18 +193,27 @@ with tab1:
                 performance_data = []
                 
                 for nome_indice, data in dati_indici.items():
-                    if len(data) > 1:
+                    if len(data) > 1 and 'Close' in data.columns:
                         # Assicuriamoci di ottenere valori scalari
-                        inizio = float(data['Close'].iloc[0])
-                        fine = float(data['Close'].iloc[-1])
-                        performance = ((fine - inizio) / inizio) * 100
-                        
-                        performance_data.append({
-                            "Indice": nome_indice,
-                            "Performance (%)": round(performance, 2),  # Valore numerico
-                            "Prezzo Attuale": round(fine, 2),
-                            "Var. Assoluta": round(fine - inizio, 2)
-                        })
+                        close_series = data['Close'].dropna()
+                        if len(close_series) >= 2:
+                            inizio = close_series.iloc[0]
+                            fine = close_series.iloc[-1]
+                            
+                            # Convertiamo esplicitamente a float se necessario
+                            if hasattr(inizio, 'item'):
+                                inizio = inizio.item()
+                            if hasattr(fine, 'item'):
+                                fine = fine.item()
+                                
+                            performance = ((fine - inizio) / inizio) * 100
+                            
+                            performance_data.append({
+                                "Indice": nome_indice,
+                                "Performance (%)": round(float(performance), 2),
+                                "Prezzo Attuale": round(float(fine), 2),
+                                "Var. Assoluta": round(float(fine - inizio), 2)
+                            })
                 
                 if performance_data:
                     df_performance = pd.DataFrame(performance_data)
