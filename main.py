@@ -357,24 +357,59 @@ with tab2:
             
             if dati_portfolio and len(dati_portfolio) > 0:
                 try:
-                    # Creiamo il DataFrame solo se abbiamo dati validi
-                    df_portfolio = pd.DataFrame(dati_portfolio)
+                    # Verifichiamo che tutti i dati siano Series valide
+                    dati_validi = {}
+                    for nome, serie in dati_portfolio.items():
+                        if isinstance(serie, pd.Series) and len(serie) > 1:
+                            dati_validi[nome] = serie
+                        else:
+                            st.warning(f"Dati non validi per {nome}: tipo {type(serie)}, lunghezza {len(serie) if hasattr(serie, '__len__') else 'N/A'}")
+                    
+                    if not dati_validi:
+                        st.error("Nessuna serie valida trovata per il portfolio.")
+                        st.stop()
+                    
+                    # Trova l'indice comune più lungo
+                    indici = [serie.index for serie in dati_validi.values()]
+                    indice_comune = indici[0]
+                    for idx in indici[1:]:
+                        indice_comune = indice_comune.intersection(idx)
+                    
+                    if len(indice_comune) < 2:
+                        st.error(f"Dati insufficienti sovrapposti tra gli indici. Solo {len(indice_comune)} giorni in comune.")
+                        st.write("Debug - Range di date per ogni indice:")
+                        for nome, serie in dati_validi.items():
+                            st.write(f"- {nome}: da {serie.index.min()} a {serie.index.max()} ({len(serie)} giorni)")
+                        st.stop()
+                    
+                    # Creiamo il DataFrame con l'indice comune
+                    df_portfolio_dict = {}
+                    for nome, serie in dati_validi.items():
+                        df_portfolio_dict[nome] = serie.reindex(indice_comune).dropna()
+                    
+                    df_portfolio = pd.DataFrame(df_portfolio_dict)
                     
                     # Rimuoviamo le righe con NaN
                     df_portfolio = df_portfolio.dropna()
                     
                     # Verifichiamo che abbiamo ancora dati dopo il dropna
-                    if len(df_portfolio) == 0:
-                        st.error("Nessun dato valido dopo la pulizia. Prova con un periodo diverso.")
+                    if len(df_portfolio) < 2:
+                        st.error(f"Dati insufficienti dopo la pulizia: solo {len(df_portfolio)} righe valide.")
                         st.stop()
                         
                 except Exception as e:
                     st.error(f"Errore nella creazione del DataFrame portfolio: {str(e)}")
                     
-                    # Debug: mostriamo le informazioni sui dati
-                    st.write("Debug - Dati portfolio:")
+                    # Debug dettagliato
+                    st.write("Debug - Dati portfolio dettagliati:")
                     for nome, serie in dati_portfolio.items():
-                        st.write(f"- {nome}: {len(serie) if hasattr(serie, '__len__') else 'scalar'} punti")
+                        if isinstance(serie, pd.Series):
+                            st.write(f"- {nome}: Series di {len(serie)} elementi")
+                            st.write(f"  - Primo: {serie.iloc[0] if len(serie) > 0 else 'N/A'}")
+                            st.write(f"  - Ultimo: {serie.iloc[-1] if len(serie) > 0 else 'N/A'}")
+                            st.write(f"  - Index type: {type(serie.index)}")
+                        else:
+                            st.write(f"- {nome}: tipo {type(serie)}, valore {serie}")
                     st.stop()
                 
                 if len(df_portfolio) > 0:
