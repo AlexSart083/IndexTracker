@@ -325,7 +325,12 @@ with tab2:
                     try:
                         data = yf.download(ticker, period=periodo_mapping[periodo], progress=False)
                         if not data.empty and 'Close' in data.columns:
-                            dati_portfolio[indice] = data['Close']
+                            # Assicuriamoci che i dati abbiano un indice datetime valido
+                            close_data = data['Close'].dropna()
+                            if len(close_data) > 1:  # Almeno 2 punti dati
+                                dati_portfolio[indice] = close_data
+                            else:
+                                errori_portfolio.append(f"{indice}: Dati insufficienti")
                         else:
                             errori_portfolio.append(f"{indice}: Nessun dato disponibile")
                     except Exception as e:
@@ -336,17 +341,50 @@ with tab2:
                     for errore in errori_portfolio:
                         st.write(f"• {errore}")
             
-            if dati_portfolio:
-                # Normalizzazione e calcolo portfolio
-                df_portfolio = pd.DataFrame(dati_portfolio)
-                df_portfolio = df_portfolio.dropna()
+            if dati_portfolio and len(dati_portfolio) > 0:
+                try:
+                    # Creiamo il DataFrame solo se abbiamo dati validi
+                    df_portfolio = pd.DataFrame(dati_portfolio)
+                    
+                    # Rimuoviamo le righe con NaN
+                    df_portfolio = df_portfolio.dropna()
+                    
+                    # Verifichiamo che abbiamo ancora dati dopo il dropna
+                    if len(df_portfolio) == 0:
+                        st.error("Nessun dato valido dopo la pulizia. Prova con un periodo diverso.")
+                        st.stop()
+                        
+                except Exception as e:
+                    st.error(f"Errore nella creazione del DataFrame portfolio: {str(e)}")
+                    
+                    # Debug: mostriamo le informazioni sui dati
+                    st.write("Debug - Dati portfolio:")
+                    for nome, serie in dati_portfolio.items():
+                        st.write(f"- {nome}: {len(serie) if hasattr(serie, '__len__') else 'scalar'} punti")
+                    st.stop()
                 
                 if len(df_portfolio) > 0:
                     # Normalizzazione a base 100
                     df_norm = df_portfolio / df_portfolio.iloc[0] * 100
                     
-                    # Calcolo valore portfolio
-                    portfolio_value = sum(df_norm[indice] * pesi[indice] for indice in dati_portfolio.keys())
+                    # Calcolo valore portfolio - solo per gli indici che abbiamo effettivamente
+                    portfolio_value = pd.Series(0, index=df_portfolio.index)
+                    pesi_effettivi = {}
+                    
+                    # Ricalcoliamo i pesi solo per gli indici disponibili
+                    indici_disponibili = list(df_portfolio.columns)
+                    peso_totale_disponibile = sum(pesi[indice] for indice in indici_disponibili if indice in pesi)
+                    
+                    if peso_totale_disponibile > 0:
+                        for indice in indici_disponibili:
+                            if indice in pesi:
+                                # Rinormalizziamo i pesi
+                                peso_normalizzato = pesi[indice] / peso_totale_disponibile
+                                pesi_effettivi[indice] = peso_normalizzato
+                                portfolio_value += df_norm[indice] * peso_normalizzato
+                    else:
+                        st.error("Nessun peso valido per gli indici disponibili.")
+                        st.stop()
                     
                     # Valore in euro
                     portfolio_euro = portfolio_value * (investimento / 100)
@@ -367,16 +405,18 @@ with tab2:
                         row=1, col=1
                     )
                     
-                    # Performance normalizzata
-                    for indice in dati_portfolio.keys():
+                    # Performance normalizzata - solo per indici disponibili
+                    for indice in indici_disponibili:
                         fig_portfolio.add_trace(
                             go.Scatter(x=df_norm.index, y=df_norm[indice], name=indice),
                             row=1, col=2
                         )
                     
-                    # Pie chart allocazione
+                    # Pie chart allocazione - usa i pesi effettivi
                     fig_portfolio.add_trace(
-                        go.Pie(labels=list(pesi.keys()), values=list(pesi.values()), name="Allocazione"),
+                        go.Pie(labels=list(pesi_effettivi.keys()), 
+                               values=list(pesi_effettivi.values()), 
+                               name="Allocazione"),
                         row=2, col=1
                     )
                     
@@ -392,6 +432,21 @@ with tab2:
                     
                     fig_portfolio.update_layout(height=600, showlegend=True)
                     st.plotly_chart(fig_portfolio, use_container_width=True)
+                    
+                    # Mostra info sui pesi effettivi se diversi da quelli originali
+                    if len(indici_disponibili) < len(indici_portfolio):
+                        st.info(f"⚠️ Portfolio ricalcolato con {len(indici_disponibili)} su {len(indici_portfolio)} indici disponibili")
+                        
+                        col_info1, col_info2 = st.columns(2)
+                        with col_info1:
+                            st.write("**Pesi Originali:**")
+                            for indice, peso in pesi.items():
+                                st.write(f"• {indice}: {peso*100:.1f}%")
+                        
+                        with col_info2:
+                            st.write("**Pesi Effettivi:**")
+                            for indice, peso in pesi_effettivi.items():
+                                st.write(f"• {indice}: {peso*100:.1f}%")
                     
                     # Metriche portfolio
                     st.subheader("📊 Metriche Portfolio")
@@ -415,7 +470,9 @@ with tab2:
                         portfolio_vol = (portfolio_euro.pct_change().std() * np.sqrt(252)) * 100
                         st.metric("Volatilità Ann.", f"{portfolio_vol:.2f}%")
                 else:
-                    st.error("Nessun dato valido trovato per il portfolio.")
+                    st.error("Nessun dato valido trovato per il portfolio dopo la pulizia.")
+            else:
+                st.error("Nessun indice del portfolio è stato caricato con successo. Verifica i ticker o prova con un periodo diverso.")
 
 with tab3:
     st.header("📈 Analisi Performance Avanzata")
