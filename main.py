@@ -38,31 +38,60 @@ INDICI_PRINCIPALI = {
     "CAC 40": "^FCHI",
     "FTSE 100": "^FTSE",
     "Euro Stoxx 50": "^SX5E",
+    "STOXX Europe 600": "^STOXX",
+    "IBEX 35": "^IBEX",
+    "AEX": "^AEX",
+    "SMI": "^SSMI",
     
     # Indici Azionari Asia-Pacifico
     "Nikkei 225": "^N225",
     "Hang Seng": "^HSI",
     "ASX 200": "^AXJO",
+    "Kospi": "^KS11",
     
     # Indici MSCI Globali
     "MSCI World": "URTH",  # ETF iShares MSCI World
     "MSCI ACWI": "ACWI",   # ETF iShares MSCI ACWI
     "MSCI EM": "EEM",      # ETF iShares MSCI Emerging Markets
+    "MSCI Europe": "IEV",  # ETF iShares MSCI Europe
     
-    # Indici Obbligazionari
+    # Indici Obbligazionari USA
     "US 10Y Treasury": "^TNX",
     "US 2Y Treasury": "^IRX",
-    "German 10Y Bund": "^TNX",  # Placeholder - useremo dati alternativi
+    "US 30Y Treasury": "^TYX",
     "TLT (20+ Year Treasury)": "TLT",  # ETF Treasury a lungo termine
     "AGG (Total Bond Market)": "AGG",  # ETF Aggregate Bond
     "LQD (Investment Grade)": "LQD",   # ETF Corporate Bond IG
     "HYG (High Yield)": "HYG",        # ETF High Yield Corporate
     "TIPS (Inflation Protected)": "SCHP", # ETF Treasury Inflation-Protected
     
+    # Indici Obbligazionari Europei
+    "German 10Y Bund": "^TNX",        # Placeholder - useremo ETF
+    "IEAG (Euro Aggregate Bond)": "IEAG", # ETF Euro Aggregate Bond
+    "IBGS (Euro Government Bond)": "IBGS", # ETF Euro Government Bond 1-3Y
+    "IGLB (Euro Government Bond)": "IGLB", # ETF Euro Government Bond 3-7Y
+    "IMGA (Euro Government Bond)": "IMGA", # ETF Euro Government Bond 7-10Y
+    "SLXX (Euro Government Bond)": "SLXX", # ETF Euro Government Bond 15-30Y
+    "IEAC (Euro Corporate Bond)": "IEAC",  # ETF Euro Corporate Bond
+    "IHYG (Euro High Yield)": "IHYG",     # ETF Euro High Yield Corporate
+    "ITPS (Euro Inflation Linked)": "ITPS", # ETF Euro Inflation Linked
+    
+    # Indici Obbligazionari UK
+    "UK 10Y Gilt": "^TNXUK",
+    "IGLS (UK Gilts)": "IGLS",           # ETF UK Gilts 1-5Y
+    "IGLL (UK Gilts)": "IGLL",           # ETF UK Gilts 3-7Y
+    "IGLH (UK Gilts)": "IGLH",           # ETF UK Gilts 7-15Y
+    "INXG (UK Gilts)": "INXG",           # ETF UK Gilts 15Y+
+    
     # Materie Prime e Alternative
     "VIX (Volatilità)": "^VIX",
     "Gold": "GC=F",
-    "Oil (WTI)": "CL=F"
+    "Silver": "SI=F",
+    "Oil (WTI)": "CL=F",
+    "Oil (Brent)": "BZ=F",
+    "Natural Gas": "NG=F",
+    "EUR/USD": "EURUSD=X",
+    "GBP/USD": "GBPUSD=X"
 }
 
 # Selezione periodo
@@ -87,26 +116,33 @@ with tab1:
     indici_selezionati = st.multiselect(
         "Seleziona gli indici da visualizzare:",
         list(INDICI_PRINCIPALI.keys()),
-        default=["S&P 500", "MSCI World", "FTSE MIB", "AGG (Total Bond Market)"]
+        default=["STOXX Europe 600", "MSCI World", "FTSE MIB", "IEAG (Euro Aggregate Bond)"]
     )
     
     # Categorie per filtraggio
-    col_filter1, col_filter2 = st.columns(2)
+    col_filter1, col_filter2, col_filter3 = st.columns(3)
     with col_filter1:
-        mostra_azionari = st.checkbox("Mostra solo Azionari", value=False)
+        mostra_azionari = st.checkbox("Solo Azionari", value=False)
     with col_filter2:
-        mostra_obbligazionari = st.checkbox("Mostra solo Obbligazionari", value=False)
+        mostra_obbligazionari = st.checkbox("Solo Obbligazionari", value=False)
+    with col_filter3:
+        mostra_europei = st.checkbox("Solo Europei", value=False)
     
     # Filtro categorie
     if mostra_azionari:
         categorie_azionarie = [k for k in INDICI_PRINCIPALI.keys() 
-                             if not any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS"])]
+                             if not any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "IGLS", "IGLL", "IGLH", "INXG", "Gilt"])]
         indici_selezionati = [idx for idx in indici_selezionati if idx in categorie_azionarie]
     
     if mostra_obbligazionari:
         categorie_obbligazionarie = [k for k in INDICI_PRINCIPALI.keys() 
-                                   if any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS"])]
+                                   if any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "IGLS", "IGLL", "IGLH", "INXG", "Gilt"])]
         indici_selezionati = [idx for idx in indici_selezionati if idx in categorie_obbligazionarie]
+    
+    if mostra_europei:
+        categorie_europee = [k for k in INDICI_PRINCIPALI.keys() 
+                           if any(x in k for x in ["FTSE", "DAX", "CAC", "Euro", "STOXX", "IBEX", "AEX", "SMI", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "IGLS", "IGLL", "IGLH", "INXG", "Gilt", "UK", "German", "EUR"])]
+        indici_selezionati = [idx for idx in indici_selezionati if idx in categorie_europee]
     
     if indici_selezionati:
         # Download dati
@@ -191,18 +227,40 @@ with tab2:
         indici_portfolio = st.multiselect(
             "Seleziona indici per il portfolio:",
             list(INDICI_PRINCIPALI.keys()),
-            default=["MSCI World", "AGG (Total Bond Market)"]
+            default=["STOXX Europe 600", "IEAG (Euro Aggregate Bond)"]
         )
         
-        # Suggerimenti allocazione
+        # Suggerimenti allocazione predefiniti
         st.markdown("**💡 Suggerimenti Allocazione:**")
-        col_sugg1, col_sugg2 = st.columns(2)
+        col_sugg1, col_sugg2, col_sugg3 = st.columns(3)
         with col_sugg1:
-            if st.button("60/40 (Azionario/Obbligaz.)"):
-                st.session_state.allocation_suggestion = "60/40"
+            if st.button("🛡️ Conservativo"):
+                st.info("30% Azionario, 70% Obbligazionario")
         with col_sugg2:
-            if st.button("80/20 (Aggressivo)"):
-                st.session_state.allocation_suggestion = "80/20"
+            if st.button("⚖️ Bilanciato"):
+                st.info("60% Azionario, 40% Obbligazionario")
+        with col_sugg3:
+            if st.button("🚀 Aggressivo"):
+                st.info("80% Azionario, 20% Obbligazionario")
+        
+        # Preset portfolio europei
+        st.markdown("**🇪🇺 Portfolio Europei Preimpostati:**")
+        col_eu1, col_eu2 = st.columns(2)
+        with col_eu1:
+            if st.button("Europa Bilanciato"):
+                st.session_state.preset_portfolio = {
+                    "STOXX Europe 600": 50,
+                    "IEAG (Euro Aggregate Bond)": 30,
+                    "IGLB (Euro Government Bond)": 20
+                }
+        with col_eu2:
+            if st.button("Europa + Globale"):
+                st.session_state.preset_portfolio = {
+                    "STOXX Europe 600": 40,
+                    "MSCI World": 20,
+                    "IEAG (Euro Aggregate Bond)": 30,
+                    "IHYG (Euro High Yield)": 10
+                }
         
         if indici_portfolio:
             st.subheader("Allocazione Pesi (%)")
@@ -336,40 +394,45 @@ with tab3:
     indici_confronto = st.multiselect(
         "Seleziona indici per l'analisi comparativa:",
         list(INDICI_PRINCIPALI.keys()),
-        default=["S&P 500", "MSCI World", "MSCI ACWI", "AGG (Total Bond Market)"]
+        default=["STOXX Europe 600", "S&P 500", "MSCI World", "IEAG (Euro Aggregate Bond)"]
     )
     
-    # Analisi per categorie
+    # Analisi per categorie migliorata
     col_cat1, col_cat2 = st.columns(2)
     with col_cat1:
-        st.subheader("📈 Indici Azionari vs Obbligazionari")
+        st.subheader("📈 Asset Class Analysis")
         if indici_confronto:
-            azionari = [idx for idx in indici_confronto if not any(x in idx for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS"])]
-            obbligazionari = [idx for idx in indici_confronto if any(x in idx for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS"])]
+            azionari = [idx for idx in indici_confronto if not any(x in idx for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "IGLS", "IGLL", "IGLH", "INXG", "Gilt"])]
+            obbligazionari = [idx for idx in indici_confronto if any(x in idx for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TIPS", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "IGLS", "IGLL", "IGLH", "INXG", "Gilt"])]
             
             if azionari:
-                st.write("**Azionari selezionati:**")
-                for az in azionari[:5]:  # Mostra max 5
+                st.write("**📊 Azionari:**")
+                for az in azionari[:5]:
                     st.write(f"• {az}")
             
             if obbligazionari:
-                st.write("**Obbligazionari selezionati:**")
-                for obb in obbligazionari[:5]:  # Mostra max 5
+                st.write("**🏛️ Obbligazionari:**")
+                for obb in obbligazionari[:5]:
                     st.write(f"• {obb}")
     
     with col_cat2:
-        st.subheader("🌍 Diversificazione Geografica")
+        st.subheader("🌍 Geographic Diversification")
         if indici_confronto:
-            usa = [idx for idx in indici_confronto if any(x in idx for x in ["S&P", "NASDAQ", "Dow", "Russell", "Treasury"])]
-            europa = [idx for idx in indici_confronto if any(x in idx for x in ["FTSE MIB", "DAX", "CAC", "FTSE 100", "Euro Stoxx"])]
-            globali = [idx for idx in indici_confronto if any(x in idx for x in ["MSCI World", "MSCI ACWI", "MSCI EM"])]
+            usa = [idx for idx in indici_confronto if any(x in idx for x in ["S&P", "NASDAQ", "Dow", "Russell", "US ", "AGG", "TLT", "LQD", "HYG"])]
+            europa = [idx for idx in indici_confronto if any(x in idx for x in ["FTSE", "DAX", "CAC", "Euro", "STOXX", "IBEX", "AEX", "SMI", "IEAG", "IBGS", "IGLB", "IMGA", "SLXX", "IEAC", "IHYG", "ITPS", "UK", "German"])]
+            globali = [idx for idx in indici_confronto if any(x in idx for x in ["MSCI World", "MSCI ACWI", "MSCI EM", "MSCI Europe"])]
+            asia = [idx for idx in indici_confronto if any(x in idx for x in ["Nikkei", "Hang Seng", "ASX", "Kospi"])]
             
-            if usa:
-                st.write("**🇺🇸 USA:**", len(usa))
-            if europa:
-                st.write("**🇪🇺 Europa:**", len(europa))  
-            if globali:
-                st.write("**🌍 Globali:**", len(globali))
+            regions = [
+                ("🇺🇸 USA", len(usa)),
+                ("🇪🇺 Europa", len(europa)),
+                ("🌍 Globali", len(globali)),
+                ("🌏 Asia", len(asia))
+            ]
+            
+            for region, count in regions:
+                if count > 0:
+                    st.write(f"**{region}:** {count} indici")
     
     if indici_confronto:
         # Download dati
