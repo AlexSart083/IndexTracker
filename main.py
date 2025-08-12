@@ -525,17 +525,46 @@ with tab3:
         # Download dati
         with st.spinner("Analisi in corso..."):
             dati_analisi = {}
+            errori_analisi = []
+            
             for indice in indici_confronto:
                 ticker = INDICI_PRINCIPALI[indice]
                 try:
                     data = yf.download(ticker, period="2y", progress=False)
                     if not data.empty and 'Close' in data.columns:
-                        dati_analisi[indice] = data['Close']
-                except:
-                    pass
+                        close_data = data['Close'].dropna()
+                        if len(close_data) > 30:  # Almeno 30 giorni di dati per analisi
+                            dati_analisi[indice] = close_data
+                        else:
+                            errori_analisi.append(f"{indice}: Dati insufficienti per analisi")
+                    else:
+                        errori_analisi.append(f"{indice}: Nessun dato disponibile")
+                except Exception as e:
+                    errori_analisi.append(f"{indice}: Errore nel download")
+            
+            # Mostra errori se presenti
+            if errori_analisi:
+                with st.expander("⚠️ Errori nel caricamento dati per analisi", expanded=False):
+                    for errore in errori_analisi:
+                        st.warning(errore)
         
-        if dati_analisi:
-            df_analisi = pd.DataFrame(dati_analisi).dropna()
+        if dati_analisi and len(dati_analisi) > 0:
+            try:
+                df_analisi = pd.DataFrame(dati_analisi)
+                df_analisi = df_analisi.dropna()
+                
+                if len(df_analisi) == 0:
+                    st.error("Nessun dato valido per l'analisi dopo la pulizia.")
+                    st.stop()
+                    
+            except Exception as e:
+                st.error(f"Errore nella creazione del DataFrame analisi: {str(e)}")
+                
+                # Debug: mostriamo le informazioni sui dati
+                st.write("Debug - Dati analisi:")
+                for nome, serie in dati_analisi.items():
+                    st.write(f"- {nome}: {len(serie) if hasattr(serie, '__len__') else 'scalar'} punti")
+                st.stop()
             
             if len(df_analisi) > 1:
                 returns = df_analisi.pct_change().dropna()
@@ -591,6 +620,12 @@ with tab3:
                         # Tabella metriche
                         st.subheader("📊 Metriche Dettagliate")
                         st.dataframe(df_metrics, use_container_width=True)
+                    else:
+                        st.warning("Nessuna metrica calcolabile con i dati disponibili.")
+            else:
+                st.warning("Dati insufficienti per l'analisi (serve almeno 1 giorno di dati sovrapposti).")
+        else:
+            st.error("Nessun indice è stato caricato con successo per l'analisi. Verifica i ticker selezionati.")
 
 # Footer
 st.markdown("---")
