@@ -1,14 +1,16 @@
 import streamlit as st
-import yfinance as yf
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import json
+import time
 import warnings
 warnings.filterwarnings('ignore')
 
 # Configurazione pagina
 st.set_page_config(
-    page_title="Portfolio Tracker & Analyzer",
+    page_title="Portfolio Tracker - Alpha Vantage",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -16,404 +18,420 @@ st.set_page_config(
 
 # Titolo principale
 st.title("📈 Portfolio Tracker & Analyzer")
+st.markdown("*Powered by Alpha Vantage API*")
 st.markdown("---")
 
 # Sidebar per configurazione
-st.sidebar.header("⚙️ Configurazione")
+st.sidebar.header("⚙️ Configurazione API")
 
-# Dizionario degli indici principali - CORRETTI
-INDICI_PRINCIPALI = {
-    # Indici Azionari USA
-    "S&P 500": "^GSPC",
-    "NASDAQ": "^IXIC", 
-    "Dow Jones": "^DJI",
-    "Russell 2000": "^RUT",
-    
-    # Indici Azionari Europa
-    "FTSE MIB": "FTSEMIB.MI",
-    "DAX": "^GDAXI",
-    "CAC 40": "^FCHI",
-    "FTSE 100": "^FTSE",
-    "Euro Stoxx 50": "^SX5E",
-    
-    # Indici Azionari Asia-Pacifico
-    "Nikkei 225": "^N225",
-    "Hang Seng": "^HSI",
-    
-    # ETF Obbligazionari (più affidabili)
-    "TLT (20+ Year Treasury)": "TLT",
-    "AGG (Total Bond Market)": "AGG",
-    "LQD (Investment Grade)": "LQD",
-    "HYG (High Yield)": "HYG",
-    
-    # Materie Prime e Valute
-    "VIX (Volatilità)": "^VIX",
-    "Gold ETF": "GLD",
-    "Oil ETF": "USO",
-    "EUR/USD": "EURUSD=X"
-}
-
-@st.cache_data(ttl=300)  # Cache per 5 minuti
-def download_data_safe(ticker, period="1y", max_retries=2):
-    """Download dati con retry e gestione errori migliorata"""
-    for attempt in range(max_retries):
-        try:
-            # Prova prima con yfinance standard
-            data = yf.download(ticker, period=period, progress=False, 
-                             prepost=False, auto_adjust=True, 
-                             keepna=False, threads=True)
-            
-            if not data.empty and len(data) > 1:
-                # Verifica che abbiamo dati significativi
-                if 'Close' in data.columns:
-                    close_data = data['Close'].dropna()
-                    if len(close_data) > 1:
-                        return data
-                elif len(data.columns) == 1:  # Caso di serie singola
-                    clean_data = data.dropna()
-                    if len(clean_data) > 1:
-                        return clean_data
-            
-            # Se fallisce, prova con un approccio alternativo
-            if attempt == 0:
-                ticker_obj = yf.Ticker(ticker)
-                hist_data = ticker_obj.history(period=period)
-                if not hist_data.empty and len(hist_data) > 1:
-                    return hist_data
-                    
-        except Exception as e:
-            st.warning(f"Tentativo {attempt + 1} fallito per {ticker}: {str(e)}")
-            if attempt < max_retries - 1:
-                continue
-    
-    return pd.DataFrame()
-
-def calcola_performance_safe(data, giorni_indietro=None):
-    """Calcola performance in modo più sicuro"""
-    try:
-        if data.empty:
-            return np.nan
-            
-        # Determina la colonna prezzo
-        if 'Close' in data.columns:
-            prices = data['Close'].dropna()
-        elif 'Adj Close' in data.columns:
-            prices = data['Adj Close'].dropna()
-        elif len(data.columns) == 1:
-            prices = data.iloc[:, 0].dropna()
-        else:
-            return np.nan
-            
-        if len(prices) < 2:
-            return np.nan
-            
-        prezzo_finale = prices.iloc[-1]
-        
-        if giorni_indietro is None:
-            prezzo_iniziale = prices.iloc[0]
-        else:
-            # Prendi il prezzo di N giorni fa
-            if len(prices) > giorni_indietro:
-                prezzo_iniziale = prices.iloc[-giorni_indietro-1]
-            else:
-                prezzo_iniziale = prices.iloc[0]
-        
-        if prezzo_iniziale == 0 or pd.isna(prezzo_iniziale) or pd.isna(prezzo_finale):
-            return np.nan
-            
-        return ((prezzo_finale - prezzo_iniziale) / prezzo_iniziale) * 100
-        
-    except Exception as e:
-        return np.nan
-
-def calcola_rendimento_annualizzato_safe(data, target_years):
-    """Calcola rendimento annualizzato più sicuro"""
-    try:
-        if data.empty:
-            return np.nan
-            
-        # Determina la colonna prezzo
-        if 'Close' in data.columns:
-            prices = data['Close'].dropna()
-        elif 'Adj Close' in data.columns:
-            prices = data['Adj Close'].dropna()
-        elif len(data.columns) == 1:
-            prices = data.iloc[:, 0].dropna()
-        else:
-            return np.nan
-            
-        if len(prices) < 2:
-            return np.nan
-            
-        prezzo_iniziale = prices.iloc[0]
-        prezzo_finale = prices.iloc[-1]
-        
-        # Calcola anni effettivi
-        anni_effettivi = (prices.index[-1] - prices.index[0]).days / 365.25
-        
-        if anni_effettivi <= 0 or prezzo_iniziale <= 0:
-            return np.nan
-            
-        rendimento_annuo = (((prezzo_finale / prezzo_iniziale) ** (1/anni_effettivi)) - 1) * 100
-        return rendimento_annuo
-        
-    except Exception as e:
-        return np.nan
-
-# Selezione indici da visualizzare
-st.header("📊 Performance degli Indici")
-
-# Filtri per categoria
-col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
-
-with col_filter1:
-    mostra_azionari = st.checkbox("Solo Azionari", value=False)
-with col_filter2:
-    mostra_obbligazionari = st.checkbox("Solo Obbligazionari", value=False)
-with col_filter3:
-    mostra_europei = st.checkbox("Solo Europei", value=False)
-with col_filter4:
-    mostra_americani = st.checkbox("Solo Americani", value=False)
-
-# Applicazione filtri
-indici_filtrati = list(INDICI_PRINCIPALI.keys())
-
-if mostra_azionari:
-    indici_filtrati = [k for k in indici_filtrati 
-                      if not any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TLT"])]
-
-if mostra_obbligazionari:
-    indici_filtrati = [k for k in indici_filtrati 
-                      if any(x in k for x in ["Treasury", "Bond", "AGG", "LQD", "HYG", "TLT"])]
-
-if mostra_europei:
-    indici_filtrati = [k for k in indici_filtrati 
-                      if any(x in k for x in ["FTSE", "DAX", "CAC", "Euro", "EUR"])]
-
-if mostra_americani:
-    indici_filtrati = [k for k in indici_filtrati 
-                      if any(x in k for x in ["S&P", "NASDAQ", "Dow", "Russell", "AGG", "TLT", "LQD", "HYG", "USD"])]
-
-# Selezione finale degli indici con un limite ragionevole
-max_indici = min(8, len(indici_filtrati))  # Limita per evitare timeout
-indici_selezionati = st.multiselect(
-    "Seleziona gli indici da analizzare:",
-    indici_filtrati,
-    default=indici_filtrati[:max_indici]
+# Input per API Key
+api_key = st.sidebar.text_input(
+    "Alpha Vantage API Key:",
+    type="password",
+    help="Ottieni gratuitamente su: https://www.alphavantage.co/support/#api-key"
 )
 
-# Aggiungi opzione debug
-debug_mode = st.sidebar.checkbox("Modalità Debug", value=False)
+if not api_key:
+    st.warning("⚠️ **API Key richiesta!**")
+    st.info("""
+    **Come ottenere l'API Key gratuita:**
+    
+    1. Vai su: https://www.alphavantage.co/support/#api-key
+    2. Inserisci la tua email
+    3. Riceverai l'API key via email
+    4. Incolla la chiave nella sidebar ←
+    
+    **Limiti gratuiti:** 25 richieste/giorno, 5 richieste/minuto
+    """)
+    st.stop()
 
-if indici_selezionati:
-    # Definizione dei periodi con mapping più preciso
-    periodi = {
-        "1M": ("1mo", 30),
-        "3M": ("3mo", 90),
-        "6M": ("6mo", 180),
-        "1A": ("1y", 252),
-        "2A": ("2y", 504),
-        "5A": ("5y", 1260)
-    }
+# Dizionario degli indici e azioni principali
+SIMBOLI_PRINCIPALI = {
+    # Azioni USA Principali
+    "Apple": "AAPL",
+    "Microsoft": "MSFT",
+    "Google": "GOOGL",
+    "Amazon": "AMZN",
+    "Tesla": "TSLA",
+    "Meta": "META",
+    "NVIDIA": "NVDA",
+    "Netflix": "NFLX",
+    "Berkshire Hathaway": "BRK.A",
+    "JPMorgan": "JPM",
+    
+    # ETF Indici USA
+    "S&P 500 ETF": "SPY",
+    "NASDAQ 100 ETF": "QQQ",
+    "Dow Jones ETF": "DIA",
+    "Russell 2000 ETF": "IWM",
+    
+    # ETF Settoriali
+    "Technology ETF": "XLK",
+    "Financial ETF": "XLF",
+    "Healthcare ETF": "XLV",
+    "Energy ETF": "XLE",
+    "Consumer ETF": "XLY",
+    
+    # ETF Internazionali
+    "Europe ETF": "VGK",
+    "Emerging Markets": "EEM",
+    "Japan ETF": "EWJ",
+    "China ETF": "FXI",
+    
+    # ETF Obbligazionari
+    "Treasury 20+ Year": "TLT",
+    "Aggregate Bond": "AGG",
+    "High Yield Bond": "HYG",
+    "Investment Grade": "LQD",
+    
+    # Materie Prime
+    "Gold ETF": "GLD",
+    "Silver ETF": "SLV",
+    "Oil ETF": "USO",
+    "VIX ETF": "VXX"
+}
+
+class AlphaVantageAPI:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "https://www.alphavantage.co/query"
+        self.last_request_time = 0
+        self.min_interval = 12  # 12 secondi tra richieste per rispettare il limite
+        
+    def wait_if_needed(self):
+        """Aspetta se necessario per rispettare i rate limits"""
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.min_interval:
+            wait_time = self.min_interval - elapsed
+            time.sleep(wait_time)
+    
+    def get_daily_data(self, symbol, outputsize="compact"):
+        """Scarica dati giornalieri per un simbolo"""
+        self.wait_if_needed()
+        
+        params = {
+            "function": "TIME_SERIES_DAILY_ADJUSTED",
+            "symbol": symbol,
+            "outputsize": outputsize,  # compact = 100 giorni, full = 20+ anni
+            "apikey": self.api_key
+        }
+        
+        try:
+            response = requests.get(self.base_url, params=params, timeout=30)
+            self.last_request_time = time.time()
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Controlla errori API
+                if "Error Message" in data:
+                    return None, f"Errore API: {data['Error Message']}"
+                elif "Note" in data:
+                    return None, f"Rate limit: {data['Note']}"
+                elif "Time Series (Daily)" not in data:
+                    return None, "Formato dati non valido"
+                
+                # Converte in DataFrame
+                time_series = data["Time Series (Daily)"]
+                df = pd.DataFrame.from_dict(time_series, orient='index')
+                
+                # Rinomina colonne
+                df.columns = ['Open', 'High', 'Low', 'Close', 'Adj_Close', 'Volume', 'Dividend', 'Split']
+                
+                # Converte a numerico e ordina per data
+                for col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                df.index = pd.to_datetime(df.index)
+                df = df.sort_index()
+                
+                return df, None
+            else:
+                return None, f"HTTP Error: {response.status_code}"
+                
+        except Exception as e:
+            return None, f"Errore connessione: {str(e)}"
+    
+    def test_connection(self):
+        """Testa la connessione API"""
+        try:
+            params = {
+                "function": "TIME_SERIES_INTRADAY",
+                "symbol": "AAPL",
+                "interval": "5min",
+                "apikey": self.api_key
+            }
+            
+            response = requests.get(self.base_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if "Error Message" in data:
+                    return False, data["Error Message"]
+                elif "Note" in data:
+                    return False, "Rate limit raggiunto"
+                else:
+                    return True, "Connessione OK"
+            else:
+                return False, f"HTTP {response.status_code}"
+                
+        except Exception as e:
+            return False, str(e)
+
+def calcola_performance(prezzi, giorni_indietro=None):
+    """Calcola performance percentuale"""
+    if len(prezzi) < 2:
+        return np.nan
+    
+    prezzo_finale = prezzi.iloc[-1]
+    
+    if giorni_indietro is None:
+        prezzo_iniziale = prezzi.iloc[0]
+    else:
+        if len(prezzi) > giorni_indietro:
+            prezzo_iniziale = prezzi.iloc[-(giorni_indietro + 1)]
+        else:
+            prezzo_iniziale = prezzi.iloc[0]
+    
+    if prezzo_iniziale == 0 or pd.isna(prezzo_iniziale) or pd.isna(prezzo_finale):
+        return np.nan
+        
+    return ((prezzo_finale - prezzo_iniziale) / prezzo_iniziale) * 100
+
+def calcola_volatilita(prezzi, giorni=30):
+    """Calcola volatilità annualizzata"""
+    if len(prezzi) < giorni:
+        return np.nan
+    
+    returns = prezzi.pct_change().dropna()
+    if len(returns) < 2:
+        return np.nan
+    
+    volatilita_annua = returns.std() * np.sqrt(252) * 100  # 252 giorni di trading
+    return volatilita_annua
+
+# Inizializza API
+api = AlphaVantageAPI(api_key)
+
+# Test connessione
+if st.sidebar.button("🔧 Test API"):
+    with st.sidebar.container():
+        with st.spinner("Testing..."):
+            success, message = api.test_connection()
+            if success:
+                st.sidebar.success(f"✅ {message}")
+            else:
+                st.sidebar.error(f"❌ {message}")
+
+# Selezione simboli
+st.header("📊 Analisi Performance")
+
+# Filtri per categoria
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    mostra_azioni = st.checkbox("Solo Azioni", value=False)
+with col2:
+    mostra_etf = st.checkbox("Solo ETF", value=False)
+with col3:
+    mostra_obbligazioni = st.checkbox("Solo Obbligazioni", value=False)
+with col4:
+    mostra_materie_prime = st.checkbox("Solo Materie Prime", value=False)
+
+# Applica filtri
+simboli_filtrati = list(SIMBOLI_PRINCIPALI.keys())
+
+if mostra_azioni:
+    simboli_filtrati = [k for k in simboli_filtrati 
+                       if k in ["Apple", "Microsoft", "Google", "Amazon", "Tesla", "Meta", "NVIDIA", "Netflix", "Berkshire Hathaway", "JPMorgan"]]
+
+if mostra_etf:
+    simboli_filtrati = [k for k in simboli_filtrati 
+                       if "ETF" in k]
+
+if mostra_obbligazioni:
+    simboli_filtrati = [k for k in simboli_filtrati 
+                       if any(x in k for x in ["Treasury", "Bond", "AGG", "TLT", "HYG", "LQD"])]
+
+if mostra_materie_prime:
+    simboli_filtrati = [k for k in simboli_filtrati 
+                       if any(x in k for x in ["Gold", "Silver", "Oil", "VIX"])]
+
+# Selezione finale
+simboli_selezionati = st.multiselect(
+    "Seleziona simboli da analizzare:",
+    simboli_filtrati,
+    default=simboli_filtrati[:5] if len(simboli_filtrati) >= 5 else simboli_filtrati,
+    help="⚠️ Limite API: massimo 25 simboli al giorno"
+)
+
+# Opzioni analisi
+col_period1, col_period2 = st.columns(2)
+with col_period1:
+    periodo_analisi = st.selectbox(
+        "Periodo dati:",
+        ["compact", "full"],
+        index=0,
+        help="Compact = 100 giorni, Full = 20+ anni"
+    )
+
+with col_period2:
+    mostra_volatilita = st.checkbox("Calcola Volatilità", value=True)
+
+if simboli_selezionati and st.button("📈 Analizza Performance"):
     
     # Progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Lista per i risultati
     risultati = []
-    errori_debug = []
+    errori = []
     
-    # Download e calcolo per ogni indice
-    for i, nome_indice in enumerate(indici_selezionati):
-        ticker = INDICI_PRINCIPALI[nome_indice]
-        status_text.text(f"Elaborazione: {nome_indice} ({ticker}) - {i+1}/{len(indici_selezionati)}")
+    for i, nome_simbolo in enumerate(simboli_selezionati):
+        simbolo = SIMBOLI_PRINCIPALI[nome_simbolo]
+        status_text.text(f"Elaborazione: {nome_simbolo} ({simbolo}) - {i+1}/{len(simboli_selezionati)}")
         
-        # Inizializza riga risultato
-        riga = {"Indice": nome_indice, "Ticker": ticker}
-        debug_info = {"Indice": nome_indice, "Ticker": ticker}
+        # Scarica dati
+        data, error = api.get_daily_data(simbolo, periodo_analisi)
         
-        try:
-            # Test di connessione base
-            test_data = download_data_safe(ticker, period="5d")
-            debug_info["Test_Data_Empty"] = test_data.empty
-            debug_info["Test_Data_Length"] = len(test_data)
-            
-            if test_data.empty:
-                # Fallback per ticker problematici
-                debug_info["Error"] = "Nessun dato dal test iniziale"
-                for periodo_nome in periodi.keys():
-                    riga[f"Perf_{periodo_nome}"] = "N/A"
-                riga["Rend_5A"] = "N/A"
-                errori_debug.append(debug_info)
-                risultati.append(riga)
-                continue
-            
-            # Scarica dati per ogni periodo
-            for periodo_nome, (periodo_yf, giorni) in periodi.items():
-                try:
-                    data_periodo = download_data_safe(ticker, period=periodo_yf)
-                    
-                    if not data_periodo.empty:
-                        performance = calcola_performance_safe(data_periodo)
-                        if not pd.isna(performance):
-                            riga[f"Perf_{periodo_nome}"] = f"{performance:.2f}%"
-                            debug_info[f"Success_{periodo_nome}"] = True
-                        else:
-                            riga[f"Perf_{periodo_nome}"] = "N/A"
-                            debug_info[f"Success_{periodo_nome}"] = False
-                    else:
-                        riga[f"Perf_{periodo_nome}"] = "N/A"
-                        debug_info[f"Success_{periodo_nome}"] = False
-                        
-                except Exception as e:
-                    riga[f"Perf_{periodo_nome}"] = "N/A"
-                    debug_info[f"Error_{periodo_nome}"] = str(e)
-            
-            # Calcola rendimento medio 5 anni
+        if error:
+            errori.append(f"{nome_simbolo}: {error}")
+            risultati.append({
+                "Simbolo": nome_simbolo,
+                "Ticker": simbolo,
+                "Status": "ERROR",
+                "Prezzo Attuale": "N/A",
+                "Perf 1M": "N/A",
+                "Perf 3M": "N/A",
+                "Perf 6M": "N/A",
+                "Perf 1A": "N/A",
+                "Volatilità": "N/A"
+            })
+        else:
             try:
-                data_5y = download_data_safe(ticker, period="5y")
-                if not data_5y.empty:
-                    rend_5y = calcola_rendimento_annualizzato_safe(data_5y, 5)
-                    if not pd.isna(rend_5y):
-                        riga["Rend_5A"] = f"{rend_5y:.2f}%"
-                        debug_info["Success_Rend_5A"] = True
-                    else:
-                        riga["Rend_5A"] = "N/A"
-                        debug_info["Success_Rend_5A"] = False
-                else:
-                    riga["Rend_5A"] = "N/A"
-                    debug_info["Success_Rend_5A"] = False
-            except Exception as e:
-                riga["Rend_5A"] = "N/A"
-                debug_info["Error_Rend_5A"] = str(e)
+                prezzi = data['Adj_Close'].dropna()
                 
-        except Exception as e:
-            # Errore generale
-            debug_info["General_Error"] = str(e)
-            for periodo_nome in periodi.keys():
-                riga[f"Perf_{periodo_nome}"] = "N/A"
-            riga["Rend_5A"] = "N/A"
+                if len(prezzi) == 0:
+                    errori.append(f"{nome_simbolo}: Nessun prezzo valido")
+                    continue
+                
+                prezzo_attuale = prezzi.iloc[-1]
+                
+                # Calcola performance per diversi periodi
+                perf_1m = calcola_performance(prezzi, 21)   # ~1 mese
+                perf_3m = calcola_performance(prezzi, 63)   # ~3 mesi
+                perf_6m = calcola_performance(prezzi, 126)  # ~6 mesi
+                perf_1a = calcola_performance(prezzi, 252)  # ~1 anno
+                
+                # Calcola volatilità
+                volatilita = calcola_volatilita(prezzi) if mostra_volatilita else np.nan
+                
+                risultati.append({
+                    "Simbolo": nome_simbolo,
+                    "Ticker": simbolo,
+                    "Status": "SUCCESS",
+                    "Prezzo Attuale": f"${prezzo_attuale:.2f}",
+                    "Perf 1M": f"{perf_1m:.2f}%" if not pd.isna(perf_1m) else "N/A",
+                    "Perf 3M": f"{perf_3m:.2f}%" if not pd.isna(perf_3m) else "N/A",
+                    "Perf 6M": f"{perf_6m:.2f}%" if not pd.isna(perf_6m) else "N/A",
+                    "Perf 1A": f"{perf_1a:.2f}%" if not pd.isna(perf_1a) else "N/A",
+                    "Volatilità": f"{volatilita:.1f}%" if not pd.isna(volatilita) else "N/A"
+                })
+                
+            except Exception as e:
+                errori.append(f"{nome_simbolo}: Errore calcolo - {str(e)}")
         
-        risultati.append(riga)
-        errori_debug.append(debug_info)
-        progress_bar.progress((i + 1) / len(indici_selezionati))
+        progress_bar.progress((i + 1) / len(simboli_selezionati))
+        
+        # Pausa tra richieste per rispettare rate limits
+        if i < len(simboli_selezionati) - 1:  # Non aspettare dopo l'ultima richiesta
+            time.sleep(1)
     
     # Pulisci progress bar
     progress_bar.empty()
     status_text.empty()
     
-    # Crea DataFrame finale
-    df_risultati = pd.DataFrame(risultati)
-    
-    # Rinomina colonne per visualizzazione
-    column_mapping = {
-        "Perf_1M": "1 Mese",
-        "Perf_3M": "3 Mesi", 
-        "Perf_6M": "6 Mesi",
-        "Perf_1A": "1 Anno",
-        "Perf_2A": "2 Anni",
-        "Perf_5A": "5 Anni",
-        "Rend_5A": "Rend. Medio 5A"
-    }
-    
-    df_display = df_risultati.rename(columns=column_mapping)
-    
-    # Mostra tabella
-    st.subheader("📈 Tabella Performance")
-    
-    # Rimuovi colonna Ticker se non in debug
-    if not debug_mode and "Ticker" in df_display.columns:
-        df_display = df_display.drop("Ticker", axis=1)
-    
-    st.dataframe(
-        df_display,
-        use_container_width=True,
-        height=400
-    )
-    
-    # Debug info
-    if debug_mode:
-        st.subheader("🔍 Informazioni Debug")
-        df_debug = pd.DataFrame(errori_debug)
-        st.dataframe(df_debug, use_container_width=True)
-    
-    # Statistiche riassuntive
-    st.subheader("📊 Statistiche")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        indici_caricati = len([r for r in risultati if r.get("Perf_1A", "N/A") != "N/A"])
-        st.metric("Indici con Dati", f"{indici_caricati}/{len(indici_selezionati)}")
-    
-    with col2:
-        # Conta performance positive 1 anno
-        perf_1a_positive = 0
-        for r in risultati:
-            perf_str = r.get("Perf_1A", "N/A")
-            if perf_str != "N/A":
-                try:
-                    perf_val = float(perf_str.replace("%", ""))
-                    if perf_val > 0:
-                        perf_1a_positive += 1
-                except:
-                    pass
-        st.metric("Performance 1A Positive", f"{perf_1a_positive}/{indici_caricati}")
-    
-    with col3:
-        st.metric("Ultimo Aggiornamento", datetime.now().strftime("%d/%m/%Y %H:%M"))
-    
-    # Suggerimenti se tutti i dati sono N/A
-    if indici_caricati == 0:
-        st.error("⚠️ Nessun dato disponibile. Possibili cause:")
-        st.write("""
-        - **Connessione Internet**: Verifica la connessione
-        - **Ticker non validi**: Alcuni ticker potrebbero non esistere
-        - **Limiti API**: Yahoo Finance potrebbe limitare le richieste
-        - **Problemi temporanei**: Riprova tra qualche minuto
-        """)
+    # Mostra risultati
+    if risultati:
+        st.subheader("📈 Risultati Analisi")
         
-        st.info("💡 **Suggerimenti:**")
-        st.write("""
-        - Prova con meno indici contemporaneamente
-        - Attiva la 'Modalità Debug' per vedere dettagli errori
-        - Inizia con indici principali come S&P 500 o NASDAQ
-        """)
+        df_risultati = pd.DataFrame(risultati)
+        
+        # Rimuovi colonna Status per visualizzazione se tutti sono SUCCESS
+        df_display = df_risultati.copy()
+        if all(r["Status"] == "SUCCESS" for r in risultati):
+            df_display = df_display.drop("Status", axis=1)
+        
+        st.dataframe(df_display, use_container_width=True)
+        
+        # Statistiche
+        col1, col2, col3 = st.columns(3)
+        
+        successi = len([r for r in risultati if r["Status"] == "SUCCESS"])
+        
+        with col1:
+            st.metric("Simboli Analizzati", f"{successi}/{len(simboli_selezionati)}")
+        
+        with col2:
+            # Conta performance positive 1 anno
+            perf_positive = 0
+            for r in risultati:
+                if r["Status"] == "SUCCESS" and r["Perf 1A"] != "N/A":
+                    try:
+                        perf_val = float(r["Perf 1A"].replace("%", ""))
+                        if perf_val > 0:
+                            perf_positive += 1
+                    except:
+                        pass
+            st.metric("Performance 1A Positive", f"{perf_positive}/{successi}")
+        
+        with col3:
+            st.metric("Timestamp", datetime.now().strftime("%H:%M:%S"))
+        
+        # Download CSV
+        if st.button("📥 Scarica CSV"):
+            csv = df_display.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"portfolio_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv"
+            )
     
-    # Opzione per scaricare i dati
-    if st.button("📥 Scarica Tabella CSV"):
-        csv = df_display.to_csv(index=False)
-        st.download_button(
-            label="Scarica CSV",
-            data=csv,
-            file_name=f"performance_indici_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv"
-        )
+    # Mostra errori se presenti
+    if errori:
+        st.subheader("⚠️ Errori")
+        for errore in errori:
+            st.error(errore)
+        
+        st.info("💡 **Suggerimenti per risolvere errori:**")
+        st.write("""
+        - **Rate limit**: Aspetta qualche minuto e riprova con meno simboli
+        - **Simbolo non valido**: Verifica che il ticker esista
+        - **API Key**: Controlla che sia valida e non scaduta
+        - **Connessione**: Verifica la connessione internet
+        """)
 
-else:
-    st.info("Seleziona almeno un indice per visualizzare le performance.")
+# Informazioni API
+st.sidebar.subheader("📊 Info API")
+st.sidebar.write("**Rate Limits:**")
+st.sidebar.write("• 25 richieste/giorno (gratuito)")
+st.sidebar.write("• 5 richieste/minuto")
+st.sidebar.write("• Pausa automatica tra richieste")
 
-# Test di connessione
-if st.sidebar.button("🔧 Test Connessione"):
-    with st.spinner("Test connessione a Yahoo Finance..."):
-        try:
-            test_ticker = "^GSPC"  # S&P 500
-            test_data = yf.download(test_ticker, period="5d", progress=False)
-            if not test_data.empty:
-                st.sidebar.success("✅ Connessione OK!")
-                st.sidebar.write(f"Test su S&P 500: {len(test_data)} giorni di dati")
-            else:
-                st.sidebar.error("❌ Nessun dato ricevuto")
-        except Exception as e:
-            st.sidebar.error(f"❌ Errore: {str(e)}")
+st.sidebar.write("**Upgrade Premium:**")
+st.sidebar.write("• 1200+ richieste/minuto")
+st.sidebar.write("• Dati real-time")
+st.sidebar.write("• Più funzioni")
 
 # Footer
 st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #888;'>
-        📈 Portfolio Tracker & Analyzer v2.0 | Powered by Streamlit & yfinance
+        📈 Portfolio Tracker v3.0 | Powered by Alpha Vantage API<br>
+        <a href="https://www.alphavantage.co" target="_blank">Alpha Vantage</a> | 
+        <a href="https://www.alphavantage.co/support/#api-key" target="_blank">Get Free API Key</a>
     </div>
     """, 
     unsafe_allow_html=True
